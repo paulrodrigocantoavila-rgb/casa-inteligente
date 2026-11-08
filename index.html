@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Casa Inteligente · Control de Focos</title>
+<style>
+  :root{
+    --bg1:#0f172a; --bg2:#1e293b; --card:#1f2a44; --texto:#e2e8f0; --sub:#94a3b8;
+    --on:#facc15; --onGlow:rgba(250,204,21,.55); --off:#475569; --verde:#22c55e; --rojo:#ef4444;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:"Segoe UI",system-ui,sans-serif; color:var(--texto); min-height:100vh;
+    background:radial-gradient(circle at top,var(--bg2),var(--bg1) 70%);
+    display:flex; flex-direction:column; align-items:center; padding:32px 16px;
+  }
+  header{text-align:center;margin-bottom:28px}
+  h1{font-size:2rem;letter-spacing:.5px}
+  h1 span{color:var(--on)}
+  .estado{margin-top:10px;font-size:.9rem;color:var(--sub);display:flex;gap:8px;align-items:center;justify-content:center}
+  .punto{width:10px;height:10px;border-radius:50%;background:var(--rojo);box-shadow:0 0 8px var(--rojo)}
+  .punto.ok{background:var(--verde);box-shadow:0 0 8px var(--verde)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:22px;width:100%;max-width:820px}
+  .card{
+    background:var(--card); border-radius:22px; padding:26px 20px; text-align:center;
+    border:1px solid rgba(255,255,255,.06); transition:transform .2s, box-shadow .3s;
+  }
+  .card:hover{transform:translateY(-4px)}
+  .card.on{box-shadow:0 0 40px var(--onGlow)}
+  .foco{width:110px;height:140px;margin:0 auto 14px;display:block}
+  .foco .vidrio{fill:var(--off);transition:fill .3s, filter .3s}
+  .card.on .foco .vidrio{fill:var(--on);filter:drop-shadow(0 0 18px var(--on))}
+  .foco .base{fill:#94a3b8}
+  .foco .filamento{stroke:#1e293b;stroke-width:3;fill:none}
+  .card.on .foco .filamento{stroke:#fff7c2}
+  h2{font-size:1.3rem;margin-bottom:4px}
+  .txt{font-size:.85rem;color:var(--sub);margin-bottom:18px;font-weight:600;letter-spacing:1px}
+  .card.on .txt{color:var(--on)}
+  /* Switch */
+  .switch{position:relative;display:inline-block;width:78px;height:40px}
+  .switch input{opacity:0;width:0;height:0}
+  .slider{position:absolute;inset:0;cursor:pointer;background:var(--off);border-radius:40px;transition:.3s}
+  .slider::before{content:"";position:absolute;width:32px;height:32px;left:4px;top:4px;background:#fff;border-radius:50%;transition:.3s;box-shadow:0 2px 6px rgba(0,0,0,.4)}
+  input:checked + .slider{background:var(--on)}
+  input:checked + .slider::before{transform:translateX(38px)}
+  input:disabled + .slider{opacity:.5;cursor:wait}
+  .acciones{margin-top:30px;display:flex;gap:14px;flex-wrap:wrap;justify-content:center}
+  button{
+    border:none;border-radius:14px;padding:12px 22px;font-size:1rem;font-weight:600;cursor:pointer;
+    transition:transform .15s, opacity .2s;
+  }
+  button:active{transform:scale(.96)}
+  .b-on{background:var(--on);color:#1e293b}
+  .b-off{background:#334155;color:var(--texto)}
+  footer{margin-top:34px;font-size:.8rem;color:var(--sub)}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🏠 Casa <span>Inteligente</span></h1>
+  <div class="estado"><div class="punto" id="punto"></div><span id="estadoTxt">Conectando con Firebase…</span></div>
+</header>
+
+<main class="grid" id="grid"></main>
+
+<div class="acciones">
+  <button class="b-on"  onclick="todos(true)">💡 Encender todo</button>
+  <button class="b-off" onclick="todos(false)">🌙 Apagar todo</button>
+</div>
+
+<footer>Conectado a Firebase Realtime Database · ESP32</footer>
+
+<script>
+  // ====== CONFIGURACIÓN ======
+  const DB_URL = "https://casainteligente-65d9f-default-rtdb.firebaseio.com";
+
+  // Para agregar más focos, solo añade una línea aquí (y su pin en el ESP32)
+  const FOCOS = [
+    { id: "sala",     nombre: "Sala",     icono: "🛋️" },
+    { id: "cocina",   nombre: "Cocina",   icono: "🍳" },
+    { id: "recamara", nombre: "Recámara", icono: "🛏️" }
+  ];
+
+  const estado = {};
+
+  // ====== DIBUJAR TARJETAS ======
+  const grid = document.getElementById("grid");
+  FOCOS.forEach(f => {
+    grid.insertAdjacentHTML("beforeend", `
+      <div class="card" id="card-${f.id}">
+        <svg class="foco" viewBox="0 0 100 130">
+          <path class="vidrio" d="M50 5 C22 5 8 27 8 48 C8 66 20 76 28 88 L72 88 C80 76 92 66 92 48 C92 27 78 5 50 5Z"/>
+          <path class="filamento" d="M38 86 L38 60 L44 50 L50 60 L56 50 L62 60 L62 86"/>
+          <rect class="base" x="30" y="90" width="40" height="10" rx="3"/>
+          <rect class="base" x="32" y="102" width="36" height="8" rx="3"/>
+          <rect class="base" x="38" y="112" width="24" height="10" rx="4"/>
+        </svg>
+        <h2>${f.icono} ${f.nombre}</h2>
+        <div class="txt" id="txt-${f.id}">APAGADA</div>
+        <label class="switch">
+          <input type="checkbox" id="sw-${f.id}" onchange="cambiar('${f.id}', this.checked)">
+          <span class="slider"></span>
+        </label>
+      </div>`);
+  });
+
+  function pintar(id, valor){
+    const on = valor === true;
+    estado[id] = on;
+    const card = document.getElementById("card-" + id);
+    if (!card) return;
+    card.classList.toggle("on", on);
+    document.getElementById("sw-" + id).checked = on;
+    document.getElementById("txt-" + id).textContent = on ? "ENCENDIDA" : "APAGADA";
+  }
+
+  function conexion(ok, msg){
+    document.getElementById("punto").classList.toggle("ok", ok);
+    document.getElementById("estadoTxt").textContent = msg;
+  }
+
+  // ====== ESCRIBIR EN FIREBASE ======
+  async function cambiar(id, valor){
+    const sw = document.getElementById("sw-" + id);
+    sw.disabled = true;
+    pintar(id, valor);
+    try {
+      const r = await fetch(`${DB_URL}/casa/${id}.json`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(valor)
+      });
+      if (!r.ok) throw new Error(r.status);
+    } catch (e) {
+      pintar(id, !valor);   // regresa el switch si falló
+      conexion(false, "⚠️ No se pudo enviar el cambio. Revisa las reglas de Firebase.");
+    } finally {
+      sw.disabled = false;
+    }
+  }
+
+  async function todos(valor){
+    const datos = {};
+    FOCOS.forEach(f => datos[f.id] = valor);
+    FOCOS.forEach(f => pintar(f.id, valor));
+    try {
+      await fetch(`${DB_URL}/casa.json`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(datos)
+      });
+    } catch (e) {
+      conexion(false, "⚠️ No se pudo enviar el cambio.");
+    }
+  }
+
+  // ====== ESCUCHAR CAMBIOS EN TIEMPO REAL ======
+  // Si alguien cambia un foco desde otro celular o desde la consola de Firebase,
+  // la página se actualiza sola.
+  function escuchar(){
+    const es = new EventSource(`${DB_URL}/casa.json`);
+    const manejar = (ev) => {
+      const { path, data } = JSON.parse(ev.data);
+      if (path === "/") {
+        if (data) Object.keys(data).forEach(k => pintar(k, data[k]));
+      } else {
+        pintar(path.replace("/", ""), data);
+      }
+      conexion(true, "En línea · sincronizado en tiempo real");
+    };
+    es.addEventListener("put", manejar);
+    es.addEventListener("patch", manejar);
+    es.onerror = () => conexion(false, "Reconectando con Firebase…");
+  }
+
+  escuchar();
+</script>
+</body>
+</html>
